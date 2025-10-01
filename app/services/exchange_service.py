@@ -20,7 +20,7 @@ class ExchangeService:
         self.symbol_precision: Dict[str, Dict[str, int]] = {}  # 存儲精度信息
         
         # API端點
-        self.mx_base_url = "https://api.mexc.com"
+        self.mx_base_url = "https://contract.mexc.com"  # 合約API
         self.lbank_base_url = "https://api.lbank.info"
     
     async def initialize(self):
@@ -67,36 +67,35 @@ class ExchangeService:
             logger.error(f"載入交易對列表失敗: {e}")
     
     async def _get_mx_symbols(self) -> Set[str]:
-        """獲取MX交易所的交易對列表"""
+        """獲取MX合約交易所的交易對列表"""
         try:
-            url = f"{self.mx_base_url}/api/v3/exchangeInfo"
+            url = f"{self.mx_base_url}/api/v1/contract/detail"
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     symbols = set()
                     
-                    for symbol_info in data.get('symbols', []):
-                        # MX API中狀態為"1"表示可交易
-                        if symbol_info.get('status') == '1':
-                            symbol = symbol_info.get('symbol', '')
-                            # 轉換格式：BTCUSDT -> BTC/USDT
-                            if symbol.endswith('USDT'):
-                                base = symbol[:-4]
-                                formatted_symbol = f"{base}/USDT"
+                    # 合約API返回格式: {"success": true, "code": 0, "data": [...]}
+                    if data.get('success') and data.get('data'):
+                        for contract_info in data['data']:
+                            symbol = contract_info.get('symbol', '')
+                            # 合約格式：BTC_USDT，轉換為 BTC/USDT
+                            if '_USDT' in symbol:
+                                formatted_symbol = symbol.replace('_', '/')
                                 symbols.add(formatted_symbol)
                                 
-                                # 保存精度信息
+                                # 保存精度信息（合約通常是4位小數）
                                 self.symbol_precision[formatted_symbol] = {
-                                    'price_precision': symbol_info.get('quotePrecision', 4),
-                                    'quantity_precision': symbol_info.get('baseAssetPrecision', 6)
+                                    'price_precision': contract_info.get('priceUnit', 4),
+                                    'quantity_precision': contract_info.get('volUnit', 0)
                                 }
                     
                     return symbols
                 else:
-                    logger.error(f"MX API請求失敗: {response.status}")
+                    logger.error(f"MX合約API請求失敗: {response.status}")
                     return set()
         except Exception as e:
-            logger.error(f"獲取MX交易對失敗: {e}")
+            logger.error(f"獲取MX合約交易對失敗: {e}")
             return set()
     
     async def _get_lbank_symbols(self) -> Set[str]:
@@ -135,67 +134,55 @@ class ExchangeService:
         common_symbols = sorted(list(self.mx_symbols & self.lbank_symbols))
         return common_symbols
     
-    def _calculate_precision(self, price_str: str) -> int:
-        """從價格字符串計算實際精度"""
-        try:
-            # 移除尾部的0
-            price_str = price_str.rstrip('0').rstrip('.')
-            if '.' in price_str:
-                return len(price_str.split('.')[1])
-            return 0
-        except:
-            return 4  # 默認4位
-    
     async def get_mx_orderbook(self, symbol: str) -> Optional[OrderBook]:
-        """獲取MX交易所的訂單簿"""
+        """獲取MX合約交易所的訂單簿"""
         try:
-            # 轉換格式：BTC/USDT -> BTCUSDT
-            mx_symbol = symbol.replace('/', '')
-            url = f"{self.mx_base_url}/api/v3/depth"
-            params = {'symbol': mx_symbol, 'limit': 20}
+            # 轉換格式：BTC/USDT -> BTC_USDT
+            mx_symbol = symbol.replace('/', '_')
+            url = f"{self.mx_base_url}/api/v1/contract/depth/{mx_symbol}"
             
-            async with self.session.get(url, params=params) as response:
+            async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     
+                    # 合約API返回格式: {"success": true, "code": 0, "data": {"asks": [...], "bids": [...]}}
+                    if not data.get('success') or not data.get('data'):
+                        logger.error(f"MX合約API返回錯誤: {data}")
+                        return None
+                    
+                    order_data = data['data']
+                    
                     # 解析買單和賣單
+                    # 合約API格式: [[price, quantity, unknown], ...]
                     bids = [
                         OrderBookEntry(price=float(bid[0]), quantity=float(bid[1]))
-                        for bid in data.get('bids', [])
+                        for bid in order_data.get('bids', [])[:20]
                     ]
                     asks = [
                         OrderBookEntry(price=float(ask[0]), quantity=float(ask[1]))
-                        for ask in data.get('asks', [])
+                        for ask in order_data.get('asks', [])[:20]
                     ]
                     
-                    # 從實際數據計算精度
-                    price_precision = 4  # 默認
-                    quantity_precision = 6  # 默認
-                    
-                    if data.get('asks') and len(data['asks']) > 0:
-                        # 取第一個ask的價格字符串來計算精度
-                        price_precision = self._calculate_precision(data['asks'][0][0])
-                    if data.get('bids') and len(data['bids']) > 0:
-                        # 取第一個bid的數量字符串來計算精度
-                        quantity_precision = self._calculate_precision(data['bids'][0][1])
-                    
-                    # 至少保持4位小數
-                    price_precision = max(price_precision, 4)
+                    # 獲取精度信息
+                    precision_info = self.symbol_precision.get(symbol, {
+                        'price_precision': 4,
+                        'quantity_precision': 0
+                    })
                     
                     return OrderBook(
-                        exchange="MX",
+                        exchange="Mexc",
                         symbol=symbol,
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(),
-                        price_precision=price_precision,
-                        quantity_precision=quantity_precision
+                        price_precision=precision_info['price_precision'],
+                        quantity_precision=precision_info['quantity_precision']
                     )
                 else:
-                    logger.error(f"MX訂單簿API請求失敗: {response.status}")
+                    logger.error(f"MX合約訂單簿API請求失敗: {response.status}")
                     return None
         except Exception as e:
-            logger.error(f"獲取MX訂單簿失敗: {e}")
+            logger.error(f"獲取MX合約訂單簿失敗: {e}")
             return None
     
     async def get_lbank_orderbook(self, symbol: str) -> Optional[OrderBook]:
@@ -232,19 +219,11 @@ class ExchangeService:
                         for ask in order_data.get('asks', [])
                     ]
                     
-                    # 從實際數據計算精度
-                    price_precision = 4  # 默認
-                    quantity_precision = 6  # 默認
-                    
-                    if order_data.get('asks') and len(order_data['asks']) > 0:
-                        # 取第一個ask的價格字符串來計算精度
-                        price_precision = self._calculate_precision(str(order_data['asks'][0][0]))
-                    if order_data.get('bids') and len(order_data['bids']) > 0:
-                        # 取第一個bid的數量字符串來計算精度
-                        quantity_precision = self._calculate_precision(str(order_data['bids'][0][1]))
-                    
-                    # 至少保持4位小數
-                    price_precision = max(price_precision, 4)
+                    # 使用與MX相同的精度信息
+                    precision_info = self.symbol_precision.get(symbol, {
+                        'price_precision': 4,
+                        'quantity_precision': 6
+                    })
                     
                     return OrderBook(
                         exchange="LBank",
@@ -252,8 +231,8 @@ class ExchangeService:
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(),
-                        price_precision=price_precision,
-                        quantity_precision=quantity_precision
+                        price_precision=precision_info['price_precision'],
+                        quantity_precision=precision_info['quantity_precision']
                     )
                 else:
                     logger.error(f"LBank訂單簿API請求失敗: {response.status}")
