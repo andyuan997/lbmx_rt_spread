@@ -86,8 +86,8 @@ class ExchangeService:
                                 
                                 # 保存精度信息（合約通常是4位小數）
                                 self.symbol_precision[formatted_symbol] = {
-                                    'price_precision': contract_info.get('priceUnit', 4),
-                                    'quantity_precision': contract_info.get('volUnit', 0)
+                                    'price_precision': contract_info.get('priceScale', 4),
+                                    'quantity_precision': contract_info.get('volScale', 0)
                                 }
                     
                     return symbols
