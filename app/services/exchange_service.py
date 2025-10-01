@@ -135,6 +135,17 @@ class ExchangeService:
         common_symbols = sorted(list(self.mx_symbols & self.lbank_symbols))
         return common_symbols
     
+    def _calculate_precision(self, price_str: str) -> int:
+        """從價格字符串計算實際精度"""
+        try:
+            # 移除尾部的0
+            price_str = price_str.rstrip('0').rstrip('.')
+            if '.' in price_str:
+                return len(price_str.split('.')[1])
+            return 0
+        except:
+            return 4  # 默認4位
+    
     async def get_mx_orderbook(self, symbol: str) -> Optional[OrderBook]:
         """獲取MX交易所的訂單簿"""
         try:
@@ -157,11 +168,19 @@ class ExchangeService:
                         for ask in data.get('asks', [])
                     ]
                     
-                    # 獲取精度信息
-                    precision_info = self.symbol_precision.get(symbol, {
-                        'price_precision': 4,
-                        'quantity_precision': 6
-                    })
+                    # 從實際數據計算精度
+                    price_precision = 4  # 默認
+                    quantity_precision = 6  # 默認
+                    
+                    if data.get('asks') and len(data['asks']) > 0:
+                        # 取第一個ask的價格字符串來計算精度
+                        price_precision = self._calculate_precision(data['asks'][0][0])
+                    if data.get('bids') and len(data['bids']) > 0:
+                        # 取第一個bid的數量字符串來計算精度
+                        quantity_precision = self._calculate_precision(data['bids'][0][1])
+                    
+                    # 至少保持4位小數
+                    price_precision = max(price_precision, 4)
                     
                     return OrderBook(
                         exchange="MX",
@@ -169,8 +188,8 @@ class ExchangeService:
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(),
-                        price_precision=precision_info['price_precision'],
-                        quantity_precision=precision_info['quantity_precision']
+                        price_precision=price_precision,
+                        quantity_precision=quantity_precision
                     )
                 else:
                     logger.error(f"MX訂單簿API請求失敗: {response.status}")
@@ -213,11 +232,19 @@ class ExchangeService:
                         for ask in order_data.get('asks', [])
                     ]
                     
-                    # 使用與MX相同的精度信息
-                    precision_info = self.symbol_precision.get(symbol, {
-                        'price_precision': 4,
-                        'quantity_precision': 6
-                    })
+                    # 從實際數據計算精度
+                    price_precision = 4  # 默認
+                    quantity_precision = 6  # 默認
+                    
+                    if order_data.get('asks') and len(order_data['asks']) > 0:
+                        # 取第一個ask的價格字符串來計算精度
+                        price_precision = self._calculate_precision(str(order_data['asks'][0][0]))
+                    if order_data.get('bids') and len(order_data['bids']) > 0:
+                        # 取第一個bid的數量字符串來計算精度
+                        quantity_precision = self._calculate_precision(str(order_data['bids'][0][1]))
+                    
+                    # 至少保持4位小數
+                    price_precision = max(price_precision, 4)
                     
                     return OrderBook(
                         exchange="LBank",
@@ -225,8 +252,8 @@ class ExchangeService:
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(),
-                        price_precision=precision_info['price_precision'],
-                        quantity_precision=precision_info['quantity_precision']
+                        price_precision=price_precision,
+                        quantity_precision=quantity_precision
                     )
                 else:
                     logger.error(f"LBank訂單簿API請求失敗: {response.status}")
