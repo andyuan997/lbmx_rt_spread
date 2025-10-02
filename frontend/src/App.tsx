@@ -43,7 +43,7 @@ const App: React.FC = () => {
         console.log('收到WebSocket數據:', data.type, data.symbol, data.mode);
         
         if (data.type === 'market_update' && data.symbol === currentSymbol) {
-          // 更新訂單簿數據
+          // 更新訂單簿數據（總是更新，不依賴模式）
           setMxOrderBook(data.mx_orderbook);
           setLbankOrderBook(data.lbank_orderbook);
           
@@ -100,7 +100,7 @@ const App: React.FC = () => {
     };
     
     setWs(websocket);
-  }, [currentSymbol, tradingMode]);
+  }, [currentSymbol]);
 
   // 載入可用交易對
   const loadAvailableSymbols = async () => {
@@ -140,9 +140,14 @@ const App: React.FC = () => {
 
   // 切換交易模式
   const handleModeChange = (mode: TradingMode) => {
+    // 防止快速切換
+    if (mode === tradingMode) return;
+    
     setTradingMode(mode);
     // 清空圖表數據，因為不同模式的價差不同
     setChartData([]);
+    // 清空當前價差數據，避免顯示錯誤數據
+    setSpreadData(null);
   };
 
   // 初始化
@@ -159,13 +164,13 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 當交易對或模式改變時重新連接
+  // 當交易對改變時重新連接（模式改變不需要重新連接）
   useEffect(() => {
     if (ws) {
       ws.close();
     }
     connectWebSocket();
-  }, [currentSymbol, tradingMode]);
+  }, [currentSymbol]);
 
   return (
     <div className="min-h-screen bg-bg-dark text-white p-4">

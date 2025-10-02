@@ -100,6 +100,8 @@ async def startup_event():
 
 async def market_data_stream():
     """背景任務：處理市場數據並廣播給客戶端"""
+    last_data = {}  # 緩存上次的數據，避免重複廣播
+    
     while True:
         try:
             # 獲取當前選中的交易對
@@ -110,8 +112,6 @@ async def market_data_stream():
             lbank_orderbook = await exchange_service.get_lbank_orderbook(current_symbol)
             
             if mx_orderbook and lbank_orderbook:
-                logger.info(f"獲取到訂單簿數據: MX({len(mx_orderbook.bids)}買單,{len(mx_orderbook.asks)}賣單), LBank({len(lbank_orderbook.bids)}買單,{len(lbank_orderbook.asks)}賣單)")
-                
                 # 計算價差數據
                 for mode in ['mx_buy_lbank_sell', 'lbank_buy_mx_sell']:
                     spread_data = spread_calculator.calculate_spread(
@@ -119,8 +119,6 @@ async def market_data_stream():
                     )
                     
                     if spread_data:
-                        logger.info(f"計算價差成功: {mode}, 價差={spread_data.spread:.6f}")
-                        
                         # 構建廣播數據
                         broadcast_data = {
                             'type': 'market_update',
@@ -132,8 +130,16 @@ async def market_data_stream():
                             'timestamp': spread_data.timestamp.isoformat()
                         }
                         
-                        await manager.broadcast(json.dumps(broadcast_data, default=str))
-                        logger.info(f"廣播數據: {mode}, 連接數={len(manager.active_connections)}")
+                        # 檢查數據是否有變化，避免重複廣播
+                        data_key = f"{current_symbol}_{mode}"
+                        data_hash = hash(json.dumps(broadcast_data, default=str, sort_keys=True))
+                        
+                        if last_data.get(data_key) != data_hash:
+                            await manager.broadcast(json.dumps(broadcast_data, default=str))
+                            last_data[data_key] = data_hash
+                            logger.debug(f"廣播數據: {mode}, 價差={spread_data.spread:.6f}, 連接數={len(manager.active_connections)}")
+                        else:
+                            logger.debug(f"數據未變化，跳過廣播: {mode}")
                     else:
                         logger.warning(f"價差計算失敗: {mode}")
             else:
