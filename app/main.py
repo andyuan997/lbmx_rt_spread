@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -27,25 +27,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# 靜態文件服務 (用於 Fly.io 部署)
-if os.path.exists("frontend/build"):
-    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
-    
-    @app.get("/")
-    async def serve_frontend():
-        """服務前端應用"""
-        return FileResponse("frontend/build/index.html")
-    
-    @app.get("/{path:path}")
-    async def serve_frontend_routes(path: str):
-        """處理前端路由"""
-        # 如果是 API 路由，讓 FastAPI 處理
-        if path.startswith("api/") or path.startswith("ws"):
-            return {"error": "Not found"}
-        
-        # 否則返回前端 index.html
-        return FileResponse("frontend/build/index.html")
 
 # 全域變數儲存服務實例
 exchange_service = ExchangeService()
@@ -193,6 +174,25 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health_check():
     """健康檢查端點"""
     return {"status": "healthy", "service": "lbmx-spread-monitor"}
+
+# 靜態文件服務 (用於 Fly.io 部署)
+if os.path.exists("frontend/build"):
+    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+    
+    @app.get("/")
+    async def serve_frontend():
+        """服務前端應用"""
+        return FileResponse("frontend/build/index.html")
+    
+    @app.get("/{path:path}")
+    async def serve_frontend_routes(path: str):
+        """處理前端路由"""
+        # 如果是 API 路由或 WebSocket，不處理
+        if path.startswith("api/") or path.startswith("ws") or path.startswith("docs") or path.startswith("openapi.json"):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # 否則返回前端 index.html
+        return FileResponse("frontend/build/index.html")
 
 if __name__ == "__main__":
     import uvicorn
