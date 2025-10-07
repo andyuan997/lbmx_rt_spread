@@ -45,3 +45,10 @@ export interface ChartDataPoint {
 }
 
 export type TradingMode = 'mx_buy_lbank_sell' | 'lbank_buy_mx_sell';
+
+export type SymbolMode = 'common' | 'custom';
+
+export interface CustomSymbolRequest {
+  mx_symbol: string;
+  lbank_symbol: string;
+}

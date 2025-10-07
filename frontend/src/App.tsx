@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { MarketUpdate, TradingMode, ChartDataPoint, OrderBook, SpreadData } from './types/market';
+import { MarketUpdate, TradingMode, ChartDataPoint, OrderBook, SpreadData, SymbolMode, CustomSymbolRequest } from './types/market';
 import SymbolSearch from './components/SymbolSearch';
 import OrderBookComponent from './components/OrderBookComponent';
 import SpreadChart from './components/SpreadChart';
 import TradingModeToggle from './components/TradingModeToggle';
 import SpreadDisplay from './components/SpreadDisplay';
 import ConnectionStatus from './components/ConnectionStatus';
+import SymbolModeToggle from './components/SymbolModeToggle';
+import CustomSymbolSelector from './components/CustomSymbolSelector';
 
 const App: React.FC = () => {
   // 狀態管理
   const [currentSymbol, setCurrentSymbol] = useState<string>('BTC/USDT');
+  const [mxSymbol, setMxSymbol] = useState<string>('BTC/USDT'); // MX交易所幣種
+  const [lbankSymbol, setLbankSymbol] = useState<string>('BTC/USDT'); // LBank交易所幣種
   const [tradingMode, setTradingMode] = useState<TradingMode>('mx_buy_lbank_sell');
+  const [symbolMode, setSymbolMode] = useState<SymbolMode>('common');
   const [mxOrderBook, setMxOrderBook] = useState<OrderBook | null>(null);
   const [lbankOrderBook, setLbankOrderBook] = useState<OrderBook | null>(null);
   const [spreadData, setSpreadData] = useState<SpreadData | null>(null);
@@ -24,11 +29,24 @@ const App: React.FC = () => {
 
   // WebSocket連接管理
   const connectWebSocket = useCallback(() => {
+    // 如果已經有連接且狀態正常，不重複連接
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('WebSocket已連接，跳過重複連接');
+      return;
+    }
+    
+    // 關閉現有連接
+    if (ws) {
+      console.log('關閉現有WebSocket連接');
+      ws.close();
+    }
+    
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // 開發環境使用8000端口，生產環境使用當前host
     const host = process.env.NODE_ENV === 'development' ? 'localhost:8001' : window.location.host;
     const wsUrl = `${protocol}//${host}/ws`;
     
+    console.log('建立新的WebSocket連接:', wsUrl);
     const websocket = new WebSocket(wsUrl);
     
     websocket.onopen = () => {
@@ -130,6 +148,8 @@ const App: React.FC = () => {
       
       if (response.ok) {
         setCurrentSymbol(symbol);
+        setMxSymbol(symbol);
+        setLbankSymbol(symbol);
         // 清空圖表數據
         setChartData([]);
       }
@@ -150,6 +170,42 @@ const App: React.FC = () => {
     setSpreadData(null);
   };
 
+  // 切換幣種模式
+  const handleSymbolModeChange = (mode: SymbolMode) => {
+    setSymbolMode(mode);
+    // 清空圖表數據和價差數據
+    setChartData([]);
+    setSpreadData(null);
+  };
+
+  // 處理自選幣種
+  const handleCustomSymbolsChange = useCallback(async (request: CustomSymbolRequest) => {
+    try {
+      const apiUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:8001' : '';
+      const response = await fetch(`${apiUrl}/api/symbol/custom`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setCurrentSymbol(data.mx_symbol);
+        setMxSymbol(data.mx_symbol);
+        setLbankSymbol(data.lbank_symbol);
+        // 清空圖表數據
+        setChartData([]);
+      } else {
+        console.error('設置自選幣種失敗:', data.message);
+      }
+    } catch (error) {
+      console.error('設置自選幣種失敗:', error);
+    }
+  }, []);
+
   // 初始化
   useEffect(() => {
     console.log('初始化應用程序...');
@@ -167,9 +223,15 @@ const App: React.FC = () => {
   // 當交易對改變時重新連接（模式改變不需要重新連接）
   useEffect(() => {
     if (ws) {
+      console.log('交易對改變，關閉舊連接');
       ws.close();
     }
-    connectWebSocket();
+    // 延遲重新連接，避免快速切換
+    const timer = setTimeout(() => {
+      connectWebSocket();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [currentSymbol]);
 
   return (
@@ -182,11 +244,25 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-4">
-          <SymbolSearch
-            symbols={availableSymbols}
-            currentSymbol={currentSymbol}
-            onSymbolChange={handleSymbolChange}
+          {/* 幣種模式切換 */}
+          <SymbolModeToggle
+            mode={symbolMode}
+            onModeChange={handleSymbolModeChange}
           />
+          
+          {/* 根據模式顯示不同的選擇器 */}
+          {symbolMode === 'common' ? (
+            <SymbolSearch
+              symbols={availableSymbols}
+              currentSymbol={currentSymbol}
+              onSymbolChange={handleSymbolChange}
+            />
+          ) : (
+            <CustomSymbolSelector
+              onSymbolsChange={handleCustomSymbolsChange}
+              disabled={!isConnected}
+            />
+          )}
         </div>
       </div>
 
@@ -200,6 +276,7 @@ const App: React.FC = () => {
           exchange="mx"
           tradingMode={tradingMode}
           isConnected={isConnected}
+          currentSymbol={mxSymbol}
         />
         </div>
 
@@ -232,6 +309,7 @@ const App: React.FC = () => {
           exchange="lbank"
           tradingMode={tradingMode}
           isConnected={isConnected}
+          currentSymbol={lbankSymbol}
         />
         </div>
       </div>

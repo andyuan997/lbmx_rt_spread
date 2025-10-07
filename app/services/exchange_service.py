@@ -19,6 +19,11 @@ class ExchangeService:
         self.lbank_symbols: Set[str] = set()
         self.symbol_precision: Dict[str, Dict[str, int]] = {}  # 存儲精度信息
         
+        # 自選模式相關
+        self.custom_mode: bool = False  # 是否為自選模式
+        self.custom_mx_symbol: str = ""  # 自選模式下的MX幣種
+        self.custom_lbank_symbol: str = ""  # 自選模式下的LBank幣種
+        
         # API端點
         self.mx_base_url = "https://contract.mexc.com"  # 合約API
         self.lbank_base_url = "https://api.lbank.info"
@@ -134,6 +139,18 @@ class ExchangeService:
         common_symbols = sorted(list(self.mx_symbols & self.lbank_symbols))
         return common_symbols
     
+    async def get_mx_symbols(self) -> List[str]:
+        """獲取MX交易所的幣種列表"""
+        if not self.mx_symbols:
+            await self._load_exchange_symbols()
+        return sorted(list(self.mx_symbols))
+    
+    async def get_lbank_symbols(self) -> List[str]:
+        """獲取LBank交易所的幣種列表"""
+        if not self.lbank_symbols:
+            await self._load_exchange_symbols()
+        return sorted(list(self.lbank_symbols))
+    
     async def get_mx_orderbook(self, symbol: str) -> Optional[OrderBook]:
         """獲取MX合約交易所的訂單簿"""
         try:
@@ -185,9 +202,13 @@ class ExchangeService:
             logger.error(f"獲取MX合約訂單簿失敗: {e}")
             return None
     
-    async def get_lbank_orderbook(self, symbol: str) -> Optional[OrderBook]:
+    async def get_lbank_orderbook(self, symbol: str = None) -> Optional[OrderBook]:
         """獲取LBank交易所的訂單簿"""
         try:
+            # 在自選模式下使用自選的LBank幣種
+            if self.custom_mode and self.custom_lbank_symbol:
+                symbol = self.custom_lbank_symbol
+            
             # 轉換格式：BTC/USDT -> btc_usdt
             lbank_symbol = symbol.lower().replace('/', '_')
             url = f"{self.lbank_base_url}/v1/depth.do"
@@ -227,7 +248,7 @@ class ExchangeService:
                     
                     return OrderBook(
                         exchange="LBank",
-                        symbol=symbol,
+                        symbol=symbol,  # 使用傳入的symbol參數，而不是轉換後的lbank_symbol
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(),

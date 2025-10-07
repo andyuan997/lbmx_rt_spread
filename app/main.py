@@ -90,7 +90,11 @@ async def market_data_stream():
             
             # 獲取兩個交易所的訂單簿
             mx_orderbook = await exchange_service.get_mx_orderbook(current_symbol)
-            lbank_orderbook = await exchange_service.get_lbank_orderbook(current_symbol)
+            # 在自選模式下，LBank使用自選的幣種，否則使用當前幣種
+            lbank_symbol = current_symbol
+            if exchange_service.custom_mode and exchange_service.custom_lbank_symbol:
+                lbank_symbol = exchange_service.custom_lbank_symbol
+            lbank_orderbook = await exchange_service.get_lbank_orderbook(lbank_symbol)
             
             if mx_orderbook and lbank_orderbook:
                 # 計算價差數據
@@ -174,6 +178,60 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health_check():
     """健康檢查端點"""
     return {"status": "healthy", "service": "lbmx-spread-monitor"}
+
+@app.get("/api/symbols/mx")
+async def get_mx_symbols():
+    """獲取MX交易所的幣種列表"""
+    try:
+        symbols = await exchange_service.get_mx_symbols()
+        return {"symbols": symbols, "status": "success"}
+    except Exception as e:
+        logger.error(f"獲取MX幣種列表失敗: {e}")
+        return {"symbols": [], "status": "error", "message": str(e)}
+
+@app.get("/api/symbols/lbank")
+async def get_lbank_symbols():
+    """獲取LBank交易所的幣種列表"""
+    try:
+        symbols = await exchange_service.get_lbank_symbols()
+        return {"symbols": symbols, "status": "success"}
+    except Exception as e:
+        logger.error(f"獲取LBank幣種列表失敗: {e}")
+        return {"symbols": [], "status": "error", "message": str(e)}
+
+class CustomSymbolRequest(BaseModel):
+    mx_symbol: str
+    lbank_symbol: str
+
+@app.post("/api/symbol/custom")
+async def set_custom_symbols(request: CustomSymbolRequest):
+    """設置自選模式的交易對"""
+    try:
+        # 驗證幣種是否存在
+        mx_symbols = await exchange_service.get_mx_symbols()
+        lbank_symbols = await exchange_service.get_lbank_symbols()
+        
+        if request.mx_symbol not in mx_symbols:
+            return {"status": "error", "message": f"MX交易所沒有 {request.mx_symbol} 幣種"}
+        
+        if request.lbank_symbol not in lbank_symbols:
+            return {"status": "error", "message": f"LBank交易所沒有 {request.lbank_symbol} 幣種"}
+        
+        # 設置自選模式
+        exchange_service.current_symbol = request.mx_symbol
+        exchange_service.custom_mode = True
+        exchange_service.custom_mx_symbol = request.mx_symbol
+        exchange_service.custom_lbank_symbol = request.lbank_symbol
+        
+        logger.info(f"設置自選模式: MX={request.mx_symbol}, LBank={request.lbank_symbol}")
+        return {
+            "status": "success", 
+            "mx_symbol": request.mx_symbol,
+            "lbank_symbol": request.lbank_symbol
+        }
+    except Exception as e:
+        logger.error(f"設置自選幣種失敗: {e}")
+        return {"status": "error", "message": str(e)}
 
 # 靜態文件服務 (用於 Fly.io 部署)
 if os.path.exists("frontend/build"):

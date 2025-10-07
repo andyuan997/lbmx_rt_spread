@@ -8,6 +8,7 @@ interface OrderBookComponentProps {
   exchange?: 'mx' | 'lbank';
   tradingMode?: 'mx_buy_lbank_sell' | 'lbank_buy_mx_sell';
   isConnected?: boolean;
+  currentSymbol?: string; // 當前監控的幣種
 }
 
 const OrderBookComponent: React.FC<OrderBookComponentProps> = ({
@@ -16,7 +17,8 @@ const OrderBookComponent: React.FC<OrderBookComponentProps> = ({
   highlight = null,
   exchange,
   tradingMode,
-  isConnected = false
+  isConnected = false,
+  currentSymbol
 }) => {
   const formatPrice = (price: number): string => {
     const precision = orderBook?.price_precision || 4;
@@ -112,7 +114,14 @@ const OrderBookComponent: React.FC<OrderBookComponentProps> = ({
 
   return (
     <div className="bg-card-dark border border-border-dark rounded-lg p-4 h-full flex flex-col">
-      <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
+      <div className="text-center mb-4">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        {currentSymbol && (
+          <div className="text-base text-neutral mt-1 font-mono font-semibold">
+            {currentSymbol}
+          </div>
+        )}
+      </div>
       
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-y-auto">
